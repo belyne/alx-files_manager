@@ -1,41 +1,35 @@
-// controllers/FilesController.js
+// utils/queue.js
 
-import fs from 'fs';
-import mime from 'mime-types';
-import { generateThumbnails } from 'image-thumbnail';
-import { fileQueue } from '../utils/queue';
+import Queue from 'bull';
 
-class FilesController {
-  // ... existing code
+export const fileQueue = new Queue('fileQueue');
 
-  static async postUpload(req, res) {
-    // ... existing code
+fileQueue.process(async (job) => {
+  const { userId, fileId } = job.data;
 
-    if (type === 'image') {
-      fileQueue.add({ userId, fileId: file.id });
-    }
-
-    // ... existing code
+  if (!fileId) {
+    throw new Error('Missing fileId');
   }
 
-  // ... existing code
-
-  static async getThumbnail(req, res) {
-    // ... existing code
-
-    if (file.type === 'image' && req.query.size) {
-      const thumbnailPath = `/tmp/files_manager/${file.id}_${req.query.size}`;
-      try {
-        const thumbnailContent = await fs.promises.readFile(thumbnailPath);
-        res.setHeader('Content-Type', mime.lookup(file.name));
-        return res.status(200).send(thumbnailContent);
-      } catch (error) {
-        // If thumbnail doesn't exist, fall back to the original file
-      }
-    }
-
-    // ... existing code
+  if (!userId) {
+    throw new Error('Missing userId');
   }
-}
 
-export default FilesController;
+  const file = await dbClient.files.findOne({ _id: fileId, userId });
+
+  if (!file) {
+    throw new Error('File not found');
+  }
+
+  const imagePath = `/tmp/files_manager/${file.id}`;
+  const sizes = [500, 250, 100];
+
+  await Promise.all(sizes.map(async (size) => {
+    const thumbnailPath = `${imagePath}_${size}`;
+    await generateThumbnails({
+      source: imagePath,
+      destination: thumbnailPath,
+      width: size,
+    });
+  }));
+});
