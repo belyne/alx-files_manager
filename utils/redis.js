@@ -1,44 +1,54 @@
-import { createClient } from 'redis';
-import { promisify } from 'util';
+import redis from 'redis';
 
-// class to define methods for redis commands
 class RedisClient {
   constructor() {
-    this.client = createClient();
+    this.client = redis.createClient();
     this.client.on('error', (error) => {
-      console.log(`Redis client not connected to server: ${error}`);
+      console.error(error);
     });
   }
 
-  // check connection status and report
   isAlive() {
-    if (this.client.connected) {
-      return true;
-    }
-    return false;
+    return this.client.connected;
   }
 
-  // get value for given key from redis server
   async get(key) {
-    const getCommand = promisify(this.client.get).bind(this.client);
-    const value = await getCommand(key);
-    return value;
+    return new Promise((resolve, reject) => {
+      this.client.get(key, (error, reply) => {
+        if (error) {
+          reject(error);
+        } else {
+          resolve(reply);
+        }
+      });
+    });
   }
 
-  // set key value pair to redis server
-  async set(key, value, time) {
-    const setCommand = promisify(this.client.set).bind(this.client);
-    await setCommand(key, value);
-    await this.client.expire(key, time);
+  async set(key, value, duration) {
+    return new Promise((resolve, reject) => {
+      this.client.setex(key, duration, value, (error, reply) => {
+        if (error) {
+          reject(error);
+        } else {
+          resolve(reply);
+        }
+      });
+    });
   }
 
-  // del key value pair from redis server
   async del(key) {
-    const delCommand = promisify(this.client.del).bind(this.client);
-    await delCommand(key);
+    // eslint-disable-next-line no-unused-vars
+    return new Promise((resolve, _reject) => {
+      this.client.del(key, (error) => {
+        if (error) {
+          resolve(false);
+        } else {
+          resolve(true);
+        }
+      });
+    });
   }
 }
 
 const redisClient = new RedisClient();
-
-module.exports = redisClient;
+export default redisClient;
