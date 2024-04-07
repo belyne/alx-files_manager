@@ -1,64 +1,43 @@
-import { writeFile } from 'fs';
-import { promisify } from 'util';
-import Queue from 'bull/lib/queue';
-import imgThumbnail from 'image-thumbnail';
-import { ObjectID } from 'mongodb';
-import redisClient from './utils/redis';
+import Queue from 'bull';
+import imageThumb from 'image-thumbnail';
+import { ObjectId } from 'mongodb';
+import fs from 'fs';
 import dbClient from './utils/db';
 
+const fileQueue = new Queue('fileQueue');
+const userQueue = new Queue('userQueue');
 
-const writeFileAsync = promisify(writeFile);
-const fileQueue = new Queue('thumbnail generation');
-const userQueue = new Queue('email sending');
+fileQueue.process(async (job) => {
+  try {
+    const { fileId, userId } = job.data;
+    if (!fileId) throw new Error('Missing fileId');
+    if (!userId) throw new Error('Missing userId');
 
-/**
- * Generates the thumbnail of an image with a given width size.
- * @param {String} filePath The location of the original file.
- * @param {number} size The width of the thumbnail.
- * @returns {Promise<void>}
- */
-const generateThumbnail = async (filePath, size) => {
-  const buffer = await imgThumbnail(filePath, { width: size });
-  console.log(`Generating file: ${filePath}, size: ${size}`);
-  return writeFileAsync(`${filePath}_${size}`, buffer);
-};
+    const file = await dbClient.dbClient.collection('files').findOne({ _id: ObjectId(fileId), userId: ObjectId(userId) });
+    if (!file) throw new Error('File not found');
+    const path = file.localPath;
+    fs.writeFileSync(`${path}_500`, await imageThumb(path, { width: 500 }));
 
-fileQueue.process(async (job, done) => {
-  const fileId = job.data.fileId || null;
-  const userId = job.data.userId || null;
+    fs.writeFileSync(`${path}_250`, await imageThumb(path, { width: 250 }));
 
-  if (!fileId) {
-    throw new Error('Missing fileId');
+    fs.writeFileSync(`${path}_100`, await imageThumb(path, { width: 100 }));
+  } catch (error) {
+    console.error('An error occurred:', error);
   }
-  if (!userId) {
-    throw new Error('Missing userId');
-  }
-  console.log('Processing', job.data.name || '');
-  const userObjId = new ObjectID(userId);
-  const fileObjId = new ObjectID(fileId);
-  const filesCollection = dbClient.db.collection('files');
-  const file = await filesCollection.findOne({ _id: fileObjId, userId: userObjId });
-  if (!file) {
-    throw new Error('File not found');
-  }
-  const sizes = [500, 250, 100];
-  Promise.all(sizes.map((size) => generateThumbnail(file.localPath, size)))
-    .then(() => {
-      done();
-    });
 });
 
-userQueue.process(async (job, done) => {
-  const userId = job.data.userId || null;
+userQueue.process(async (job) => {
+  try {
+    const { userId } = job.data;
+    if (!userId) throw new Error('Missing userId');
+    // userId already objectid
+    const user = await dbClient.dbClient.collection('users').findOne({ _id: ObjectId(userId) });
+    if (!user) throw new Error('User not found');
 
-  if (!userId) {
-    throw new Error('Missing userId');
+    console.log(`Welcome ${user.email}!`);
+  } catch (error) {
+    console.error('An error occurred:', error);
   }
-  const userObjId = new ObjectID(userId);
-  const user = dbClient.db.collection('users');
-  const existingUser = await user.findOne({ _id: userObjId });
-  if (!user) {
-    throw new Error('User not found');
-  }
-  console.log(`Welcome ${user.email}!`);
 });
+
+export { fileQueue, userQueue };
